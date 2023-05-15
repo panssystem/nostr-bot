@@ -1,9 +1,11 @@
 use secp256k1::Secp256k1;
+use std::slice::Iter;
 use std::str::FromStr;
 
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
+use std::io::Write as _;
 
 #[derive(Serialize, Deserialize)]
 pub struct Message {
@@ -137,6 +139,143 @@ impl Event {
 
         let msg = format!(r#"[0,"{pubkey}",{created_at},{kind},[{formatted_tags}],"{content}"]"#);
         secp256k1::Message::from_hashed_data::<secp256k1::hashes::sha256::Hash>(msg.as_bytes())
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Filter {
+    pub events: Vec<String>,
+    pub authors: Vec<String>,
+    pub kinds: Vec<u64>,
+    pub tags: Vec<Vec<String>>,
+    pub since: u64,
+    pub until: u64,
+    pub limit: u16,
+}
+
+impl Filter {
+    pub fn new(
+        events: Vec<String>,
+        authors: Vec<String>,
+        kinds: Vec<u64>,
+        tags: Vec<Vec<String>>,
+        since: u64,
+        until: u64,
+        limit: u16,
+    ) -> Filter {
+        Filter {
+            events: events,
+            authors: authors,
+            kinds: kinds,
+            tags: tags,
+            since: since,
+            until: until,
+            limit: limit,
+        }
+    }
+
+    pub fn format(&self) -> String {
+        format!(
+            r##"{{"events": {}, "authors": {}, "kinds": {}, "#e": {}, "#p": {}, since: {}, until: {}, limit: {}}}"##,
+            Filter::format_string_list(&self.events),
+            Filter::format_string_list(&self.authors),
+            Filter::format_num_list(&self.kinds),
+            Filter::e_tags(self.tags.iter()),
+            Filter::e_tags(self.tags.iter()),
+            self.since,
+            self.until,
+            self.limit
+        )
+    }
+
+    fn format_string_list(list: &Vec<String>) -> String {
+        let mut formatted: String = String::new();
+        formatted.push('[');
+
+        for i in 0..list.len() {
+            write!(formatted, r#""{}""#, list[i]).unwrap();
+            if i + 1 < list.len() {
+                formatted.push(',');
+            }
+        }
+        formatted.push(']');
+        formatted
+    }
+
+    fn format_num_list(list: &Vec<u64>) -> String {
+        let mut formatted: String = String::new();
+        formatted.push('[');
+
+        for i in 0..list.len() {
+            write!(formatted, r#""{}""#, list[i]).unwrap();
+            if i + 1 < list.len() {
+                formatted.push(',');
+            }
+        }
+        formatted.push(']');
+        formatted
+    }
+
+    fn e_tags(tags: Iter<Vec<String>>) -> String {
+        let e_tags: Vec<String> = tags
+            .filter(|x| *x[0] == "e".to_string())
+            .map(|x| x[1].to_string())
+            .collect();
+        Filter::format_string_list(&e_tags)
+    }
+}
+#[derive(Serialize, Deserialize)]
+pub struct Subscription {
+    pub id: String,
+    pub filters: Vec<Filter>,
+}
+
+impl Subscription {
+    pub fn new(id: String, filters: Vec<Filter>) -> Self {
+        Subscription {
+            id: id.to_string(),
+            filters: filters,
+        }
+    }
+
+    pub fn format(&self) -> String {
+        format!(
+            r##"["REQ","id": "{}", {}}}]"##,
+            self.id,
+            Self::format_filters(&self.filters)
+        )
+    }
+
+    fn format_filters(list: &Vec<Filter>) -> String {
+        let mut formatted: String = String::new();
+
+        for i in 0..list.len() {
+            let filter: &Filter = &list[i];
+            write!(formatted, r#"{}"#, filter.format()).unwrap();
+            if i + 1 < list.len() {
+                formatted.push(',');
+            }
+        }
+        formatted
+    }
+
+    fn format_kinds(list: Vec<u64>) -> String {
+        let mut formatted: String = String::new();
+
+        formatted
+    }
+
+    fn format_tags(tags: Vec<Vec<String>>, tagType: char) -> String {
+        let mut formatted = String::new();
+
+        for i in 0..tags.len() {
+            let tag = &tags[i];
+            write!(formatted, r#"["{}"]"#, tag.join(r#"",""#)).unwrap();
+            if i + 1 < tags.len() {
+                formatted.push(',');
+            }
+        }
+        formatted
     }
 }
 
@@ -343,5 +482,21 @@ mod tests {
         let mut event = get_test_event(keypair);
         event.content = "Difference content".to_string();
         assert!(!event.has_valid_sig());
+    }
+
+    #[test]
+    fn valid_subscription() {
+        let filter: Filter = Filter {
+            events: vec!["event1".to_string(), "event2".to_string()],
+            authors: vec!["author1".to_string(), "author2".to_string()],
+            kinds: vec![94, 95],
+            tags: vec![],
+            since: 0,
+            until: 0,
+            limit: 10,
+        };
+        let sub: Subscription = Subscription::new("id".to_string(), vec![filter]);
+        assert_eq!(sub.id, "id");
+        assert_eq!(sub.filters[0].events.len(), 2);
     }
 }
