@@ -1,11 +1,9 @@
 use secp256k1::Secp256k1;
-use std::slice::Iter;
 use std::str::FromStr;
 
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
-use std::io::Write as _;
 
 #[derive(Serialize, Deserialize)]
 pub struct Message {
@@ -154,6 +152,7 @@ pub struct Filter {
 }
 
 impl Filter {
+    
     pub fn new(
         events: Vec<String>,
         authors: Vec<String>,
@@ -161,17 +160,31 @@ impl Filter {
         tags: Vec<Vec<String>>,
         since: u64,
         until: u64,
-        limit: u16,
-    ) -> Filter {
-        Filter {
-            events: events,
-            authors: authors,
-            kinds: kinds,
-            tags: tags,
-            since: since,
-            until: until,
-            limit: limit,
+        limit: u16
+    ) -> Self {
+        Self {
+            events,
+            authors,
+            kinds,
+            tags,
+            since,
+            until,
+            limit
         }
+    }
+
+    pub fn new_kind(
+        kind: u64
+    ) -> Self {
+        Self::new(
+            vec![],
+            vec![],
+            vec![kind],
+            vec![],
+            0,
+            0,
+            10
+        )
     }
 
     pub fn format(&self) -> String {
@@ -180,8 +193,8 @@ impl Filter {
             Filter::format_string_list(&self.events),
             Filter::format_string_list(&self.authors),
             Filter::format_num_list(&self.kinds),
-            Filter::e_tags(self.tags.iter()),
-            Filter::e_tags(self.tags.iter()),
+            Filter::filter_tags(&self.tags, "e"),
+            Filter::filter_tags(&self.tags, "p"),
             self.since,
             self.until,
             self.limit
@@ -216,9 +229,10 @@ impl Filter {
         formatted
     }
 
-    fn e_tags(tags: Iter<Vec<String>>) -> String {
+    fn filter_tags(tags: &Vec<Vec<String>>, tag_type: &str) -> String {
         let e_tags: Vec<String> = tags
-            .filter(|x| *x[0] == "e".to_string())
+        .iter()
+            .filter(|x| *x.get(0).expect("tags must have at least two entries") == tag_type.to_string())
             .map(|x| x[1].to_string())
             .collect();
         Filter::format_string_list(&e_tags)
@@ -262,19 +276,6 @@ impl Subscription {
     fn format_kinds(list: Vec<u64>) -> String {
         let mut formatted: String = String::new();
 
-        formatted
-    }
-
-    fn format_tags(tags: Vec<Vec<String>>, tagType: char) -> String {
-        let mut formatted = String::new();
-
-        for i in 0..tags.len() {
-            let tag = &tags[i];
-            write!(formatted, r#"["{}"]"#, tag.join(r#"",""#)).unwrap();
-            if i + 1 < tags.len() {
-                formatted.push(',');
-            }
-        }
         formatted
     }
 }
@@ -486,17 +487,32 @@ mod tests {
 
     #[test]
     fn valid_subscription() {
-        let filter: Filter = Filter {
-            events: vec!["event1".to_string(), "event2".to_string()],
-            authors: vec!["author1".to_string(), "author2".to_string()],
-            kinds: vec![94, 95],
-            tags: vec![],
-            since: 0,
-            until: 0,
-            limit: 10,
-        };
+        let filter: Filter = Filter::new (
+            vec!["event1".to_string(), "event2".to_string()],
+            vec!["author1".to_string(), "author2".to_string()],
+            vec![94, 95],
+            vec![],
+            0,
+            0,
+            10
+        );
         let sub: Subscription = Subscription::new("id".to_string(), vec![filter]);
         assert_eq!(sub.id, "id");
         assert_eq!(sub.filters[0].events.len(), 2);
+    }
+
+    #[test]
+    fn format_kind_filter() {
+        let filter = Filter::new (
+            vec![],
+            vec![],
+            vec![94],
+            vec![],
+            0,
+            0,
+            10
+        );
+        let formatted = filter.format();
+        assert_eq!(formatted, r##"{"events": [], "authors": [], "kinds": ["94"], "#e": [], "#p": [], since: 0, until: 0, limit: 10}"##);
     }
 }

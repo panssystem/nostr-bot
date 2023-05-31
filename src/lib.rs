@@ -15,7 +15,7 @@ pub extern crate secp256k1;
 pub extern crate tokio;
 
 pub use network::ConnectionType;
-pub use nostr::{get_reply, tags_for_reply, Event, EventNonSigned};
+pub use nostr::{get_reply, tags_for_reply, Event, EventNonSigned, Subscription, Filter};
 pub use utils::{keypair_from_secret, unix_timestamp};
 
 pub type State<T> = std::sync::Arc<tokio::sync::Mutex<T>>;
@@ -59,6 +59,14 @@ pub type FunctorRaw<State> =
 
 pub type Functor<State> = Box<FunctorRaw<State>>;
 
+pub type FunctorOptionRaw<State> = 
+fn(
+    nostr::Event,
+    State,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<nostr::EventNonSigned>> + Send>>;
+
+pub type FunctorOption<State> = Box<FunctorOptionRaw<State>>;
+
 pub type FunctorExtraRaw<State> =
     fn(
         nostr::Event,
@@ -74,6 +82,7 @@ pub type FunctorExtra<State> = Box<FunctorExtraRaw<State>>;
 #[derive(Clone)]
 pub enum FunctorType<State> {
     Basic(Functor<State>),
+    Option(FunctorOption<State>),
     Extra(FunctorExtra<State>),
 }
 
@@ -107,6 +116,21 @@ impl<State: Clone + Send + Sync> Command<State> {
     }
 }
 
+pub struct Handler<State: Clone + Send + Sync> {
+    pub sub: Subscription,
+    pub description: Option<String>,
+    functor: FunctorType<State>,
+}
+
+impl<State: Clone + Send + Sync> Handler<State> {
+    pub fn new(sub: Subscription, functor: FunctorType<State>) -> Self {
+        Self {
+            sub,
+            description: None,
+            functor
+        }
+    }
+}
 // Macros for easier wrapping
 
 /// Wraps your functor so it can be passed to the bot.
@@ -114,6 +138,12 @@ impl<State: Clone + Send + Sync> Command<State> {
 macro_rules! wrap {
     ($functor:expr) => {
         FunctorType::Basic(Box::new(|event, state| Box::pin($functor(event, state))))
+    };
+}
+#[macro_export]
+macro_rules! wrap_option {
+    ($functor:expr) => {
+        FunctorType::Option(Box::new(|event, state| Box::pin($functor(event, state))))
     };
 }
 
@@ -141,6 +171,8 @@ pub struct Bot<State: Clone + Send + Sync> {
     commands: bot::Commands<State>,
     state: State,
 
+    subscription_handlers: bot::SubscriptionHandlers<State>,
+
     profile: bot::Profile,
 
     sender: Sender, // TODO: Use Option
@@ -163,6 +195,7 @@ impl<State: Clone + Send + Sync + 'static> Bot<State> {
             user_commands: vec![],
             commands: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
             state,
+            subscription_handlers: vec![],
 
             profile: bot::Profile::new(),
 
@@ -222,6 +255,11 @@ impl<State: Clone + Send + Sync + 'static> Bot<State> {
     /// finds match it invokes given functor.
     pub fn command(mut self, command: Command<State>) -> Self {
         self.user_commands.push(command);
+        self
+    }
+
+    pub fn subscription_handler(mut self, handler: Handler<State>) -> Self {
+        self.subscription_handlers.push(handler);
         self
     }
 

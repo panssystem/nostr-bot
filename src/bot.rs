@@ -7,6 +7,7 @@ use crate::*;
 
 pub(super) type UserCommands<State> = Vec<Command<State>>;
 pub(super) type Commands<State> = std::sync::Arc<tokio::sync::Mutex<UserCommands<State>>>;
+pub(super) type SubscriptionHandlers<State> = Vec<Handler<State>>;
 
 // Implementation of internal Bot methods
 impl<State: Clone + Send + Sync + 'static> Bot<State> {
@@ -102,6 +103,7 @@ impl<State: Clone + Send + Sync + 'static> Bot<State> {
 
         info!("Main bot listener started.");
         while let Some(message) = rx.recv().await {
+            let sub_id = message.subscription_id.clone();
             let event_id = message.content.id.clone();
             if !message.content.has_valid_sig() {
                 warn!(
@@ -206,6 +208,7 @@ impl<State: Clone + Send + Sync + 'static> Bot<State> {
         if let Some(functor) = functor_to_call {
             match functor {
                 FunctorType::Basic(functor) => Some((functor)(command_event, state.clone()).await),
+                FunctorType::Option(functor) => (functor)(command_event,state.clone()).await,
                 FunctorType::Extra(functor) => {
                     Some((functor)(command_event, state.clone(), bot_info).await)
                 }
